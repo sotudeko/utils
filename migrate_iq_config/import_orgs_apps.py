@@ -2,7 +2,6 @@ import json
 import requests
 import os
 import glob
-import time
 from requests.auth import HTTPBasicAuth
 
 # --- TARGET CONFIG ---
@@ -18,89 +17,87 @@ def get_data(url):
     return res.json() if res.status_code == 200 else None
 
 def get_tag_map(org_id):
-    if not org_id: return {}
     raw_t = get_data(f"{TARGET_URL}/api/v2/applicationCategories/organization/{org_id}")
     t_list = raw_t if isinstance(raw_t, list) else (raw_t.get("categories", []) if raw_t else [])
     return {clean(t['name']).lower(): t['id'] for t in t_list}
 
 def main():
-    print("--- STARTING STRICT-VALIDATION IMPORT ---")
+    print("--- STARTING FORCE-SYNC IMPORT ---")
     
-    orgs_payload = get_data(f"{TARGET_URL}/api/v2/organizations")
-    if not orgs_payload:
-        print("Error: Target server unreachable.")
-        return
-    
-    target_orgs = {o['name']: o['id'] for o in orgs_payload.get("organizations", [])}
-    
-    # Pre-fetch Global Table
-    print("Building global tag lookup table...")
-    global_tag_lookup = {}
-    for o_name, o_id in target_orgs.items():
-        o_map = get_tag_map(o_id)
-        for t_name, t_id in o_map.items():
-            if t_name not in global_tag_lookup:
-                global_tag_lookup[t_name] = t_id
+    # Get the Root ID once
+    root_payload = get_data(f"{TARGET_URL}/api/v2/organizations")
+    target_orgs = {o['name']: o['id'] for o in root_payload.get("organizations", [])}
+    root_id = target_orgs.get("Root Organization")
+    root_tag_map = get_tag_map(root_id)
 
-    for file_path in sorted(glob.glob(f"{DATA_DIR}/*.json")):
+    # Find all JSON files
+    files = sorted(glob.glob(f"{DATA_DIR}/*.json"))
+    if not files:
+        print(f"Error: No JSON files found in {DATA_DIR}")
+        return
+
+    for file_path in files:
         with open(file_path, "r") as f:
             org_data = json.load(f)
         
         o_name = org_data['org_name']
-        if o_name == "Root Organization": continue
-
         print(f"\nProcessing Org: {o_name}")
-        target_org_id = target_orgs.get(o_name)
-        if not target_org_id: continue
 
-        # 1. Sync Local Tags with MANDATORY DESCRIPTION
-        local_map = get_tag_map(target_org_id)
+        # Ensure Org exists and get ID
+        if o_name not in target_orgs:
+            res = requests.post(f"{TARGET_URL}/api/v2/organizations", auth=AUTH, json={"name": o_name})
+            target_org_id = res.json()['id']
+            target_orgs[o_name] = target_org_id
+        else:
+            target_org_id = target_orgs[o_name]
+
+        # 1. Create Tags (Always include description)
+        local_tag_map = get_tag_map(target_org_id)
         for t_req in org_data.get('tags', []):
             t_name = t_req['name']
-            lookup = clean(t_name).lower()
-            
-            if lookup not in local_map and lookup not in global_tag_lookup:
+            if clean(t_name).lower() not in local_tag_map and clean(t_name).lower() not in root_tag_map:
                 print(f"  Creating tag: {t_name}")
-                payload = {
-                    "name": t_name,
-                    "description": f"Standard description for {t_name}", # MANDATORY FIX
-                    "color": "light-blue"
-                }
-                res = requests.post(
-                    f"{TARGET_URL}/api/v2/applicationCategories/organization/{target_org_id}", 
-                    auth=AUTH, 
-                    json=payload
-                )
-                if res.status_code not in [200, 201, 204]:
-                    print(f"  ! STILL FAILED: {res.status_code} - {res.text}")
-            
-        # Refresh local map
-        local_map = get_tag_map(target_org_id)
-        global_tag_lookup.update(local_map)
+                requests.post(f"{TARGET_URL}/api/v2/applicationCategories/organization/{target_org_id}", 
+                              auth=AUTH, 
+                              json={"name": t_name, "description": "Migrated tag", "color": "light-blue"})
+        
+        # Refresh maps
+        local_tag_map = get_tag_map(target_org_id)
+        combined_map = {**root_tag_map, **local_tag_map}
 
-        # 2. Process Apps
-        for app_export in org_data.get('apps', []):
+        # 2. Process Apps (Force checking even if they exist)
+        apps_to_process = org_data.get('apps', [])
+        print(f"  Found {len(apps_to_process)} apps in JSON.")
+
+        for app_export in apps_to_process:
+            app_name = app_export['name']
             app_pid = app_export['publicId']
-            search_res = get_data(f"{TARGET_URL}/api/v2/applications?publicId={app_pid}")
-            apps_found = search_res.get("applications", []) if search_res else []
-            if not apps_found: continue
             
-            app_obj = apps_found[0]
-            tag_payload = []
+            # Find internal ID on target
+            search = get_data(f"{TARGET_URL}/api/v2/applications?publicId={app_pid}")
+            apps_found = search.get("applications", []) if search else []
+            
+            if not apps_found:
+                print(f"    Creating app: {app_name}")
+                res = requests.post(f"{TARGET_URL}/api/v2/applications", auth=AUTH, 
+                                    json={"publicId": app_pid, "name": app_name, "organizationId": target_org_id})
+                app_obj = res.json()
+            else:
+                app_obj = apps_found[0]
 
+            # Assign Tags via PUT
+            tag_payload = []
             for t_name in app_export.get('tags', []):
                 lookup = clean(t_name).lower()
-                t_id = local_map.get(lookup) or global_tag_lookup.get(lookup)
-                
-                if t_id:
-                    tag_payload.append({"tagId": t_id})
-
+                if lookup in combined_map:
+                    tag_payload.append({"tagId": combined_map[lookup]})
+            
             app_obj['applicationTags'] = tag_payload
-            put_res = requests.put(f"{TARGET_URL}/api/v2/applications/{app_obj['id']}", 
-                                   auth=AUTH, json=app_obj)
+            res = requests.put(f"{TARGET_URL}/api/v2/applications/{app_obj['id']}", auth=AUTH, json=app_obj)
             
             if len(app_export.get('tags', [])) > 0:
-                print(f"    - {app_export['name']}: Assigned {len(tag_payload)}/{len(app_export['tags'])} tags.")
+                print(f"    - {app_name}: Linked {len(tag_payload)}/{len(app_export['tags'])} tags (Status: {res.status_code})")
 
 if __name__ == "__main__":
     main()
+    
