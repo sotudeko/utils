@@ -1,102 +1,119 @@
-import json
 import requests
-import os
-import config
+import json
 
-def get_target_lookup(endpoint):
-    url = f"{config.TARGET_URL}/api/v2/{endpoint}"
-    res = requests.get(url, auth=config.TARGET_AUTH)
-    if res.status_code == 200:
-        data = res.json()
-        items = data.get(endpoint if endpoint != 'roles' else 'roles', [])
-        return {item['name'].lower(): item['id'] for item in items}
-    return {}
+# Configuration - TARGET instance
+IQ_URL = "http://localhost:8077"
+USERNAME = "admin"
+PASSWORD = "admin123"
+
+INPUT_FILE = "iq_role_mappings_export.json"
+
+session = requests.Session()
+session.auth = (USERNAME, PASSWORD)
+session.headers.update({"Content-Type": "application/json"})
+
+
+def get_app_internal_id_by_public_id(public_id):
+    """Look up the internal ID of an application on the TARGET instance by its public ID."""
+    resp = session.get(f"{IQ_URL}/api/v2/applications", params={"publicId": public_id})
+    resp.raise_for_status()
+    apps = resp.json().get("applications", [])
+    if apps:
+        return apps[0]["id"]
+    return None
+
+
+def grant_role_global(role_id, member_type, member_name):
+    """Grant a role globally (administrator roles)."""
+    url = f"{IQ_URL}/api/v2/roleMemberships/global/role/{role_id}/{member_type}/{member_name}"
+    resp = session.put(url)
+    resp.raise_for_status()
+
+
+def grant_role_org(org_id, role_id, member_type, member_name):
+    """Grant a role to a user/group for an organization."""
+    url = f"{IQ_URL}/api/v2/roleMemberships/organization/{org_id}/role/{role_id}/{member_type}/{member_name}"
+    resp = session.put(url)
+    resp.raise_for_status()
+
+
+def grant_role_app(app_id, role_id, member_type, member_name):
+    """Grant a role to a user/group for an application."""
+    url = f"{IQ_URL}/api/v2/roleMemberships/application/{app_id}/role/{role_id}/{member_type}/{member_name}"
+    resp = session.put(url)
+    resp.raise_for_status()
+
 
 def main():
-    print("--- STARTING FIELD-AGNOSTIC IMPORT ---")
-    
-    input_file = os.path.join(config.DATA_DIR, "all_role_memberships.json")
-    with open(input_file, "r") as f:
+    with open(INPUT_FILE, "r") as f:
         data = json.load(f)
 
-    # 1. Target ID Lookups
-    target_roles = get_target_lookup("roles")
-    target_orgs = get_target_lookup("organizations")
-    target_apps = get_target_lookup("applications")
-    target_root_id = target_orgs.get("root organization")
+    # Import global role memberships
+    print("Importing global role memberships...")
+    global_memberships = data.get("global", {})
+    for mapping in global_memberships.get("memberMappings", []):
+        role_id = mapping["roleId"]
+        for member in mapping.get("members", []):
+            member_type = member["type"].lower()
+            member_name = member["userOrGroupName"]
+            try:
+                grant_role_global(role_id, member_type, member_name)
+                print(f"  [OK] Granted global role {role_id} to {member_type} '{member_name}'")
+            except requests.HTTPError as e:
+                print(f"  [WARN] Failed: {e}")
 
-    # Mapping Source UUIDs to Target Role Names
-    role_id_map = {
-        "b9646757e98e486da7d730025f5245f8": "policy administrator",
-        "764b8595856747f3945480749179366a": "owner",
-        "838d172e2d93427387d812d47756f708": "developer",
-        "1b92fae3e55a411793a091fb821c422d": "application evaluator", 
-        "3278aac26e9243cfb95cb59ad903f277": "system administrator", 
-        "1cddabf7fdaa47d6833454af10e0a3ef": "claim components"
-    }
+    # Import organization role memberships
+    print("\nImporting organization role memberships...")
+    for org_entry in data.get("organizations", []):
+        org_id = org_entry["organizationId"]
+        org_name = org_entry["organizationName"]
+        print(f"  Org: {org_name} ({org_id})")
+        memberships = org_entry.get("roleMemberships", {})
+        for mapping in memberships.get("memberMappings", []):
+            role_id = mapping["roleId"]
+            for member in mapping.get("members", []):
+                # Only import members directly assigned to this org (not inherited)
+                if member.get("ownerType") == "ORGANIZATION" and member.get("ownerId") == org_id:
+                    member_type = member["type"].lower()
+                    member_name = member["userOrGroupName"]
+                    try:
+                        grant_role_org(org_id, role_id, member_type, member_name)
+                        print(f"    [OK] Granted role {role_id} to {member_type} '{member_name}'")
+                    except requests.HTTPError as e:
+                        print(f"    [WARN] Failed: {e}")
 
-    success_count = 0
+    # Import application role memberships
+    print("\nImporting application role memberships...")
+    for app_entry in data.get("applications", []):
+        src_app_id = app_entry["applicationId"]
+        app_name = app_entry["applicationName"]
+        app_public_id = app_entry.get("applicationPublicId")
 
-    for scope, content in data.items():
-        if not content: continue
-        print(f"\nProcessing {scope}...")
-        
-        # --- LOGIC FOR GLOBAL / REPOSITORY_CONTAINER (Dictionary Structure) ---
-        if scope in ['global', 'repository_container']:
-            mappings = content.get('memberMappings', [])
-            owner_id = target_root_id 
-            o_type = "organization" if scope == 'global' else "repository_container"
-            
-            for m_group in mappings:
-                role_name = role_id_map.get(m_group.get('roleId'), '').lower()
-                t_role_id = target_roles.get(role_name)
-                if not t_role_id: continue
+        # Resolve target internal ID using public ID
+        target_app_id = None
+        if app_public_id:
+            target_app_id = get_app_internal_id_by_public_id(app_public_id)
+        if not target_app_id:
+            print(f"  [SKIP] App '{app_name}' (publicId: {app_public_id}) not found on target instance. Skipping.")
+            continue
 
-                for member in m_group.get('members', []):
-                    # FIX: Try multiple common identity keys
-                    m_identity = member.get('name') or member.get('userOrGroupId') or member.get('id')
-                    m_type = member.get('type') or member.get('ownerType') # Fallback for some export types
-                    
-                    if not m_identity or not m_type:
-                        continue
+        print(f"  App: {app_name} -> target ID: {target_app_id}")
+        memberships = app_entry.get("roleMemberships", {})
+        for mapping in memberships.get("memberMappings", []):
+            role_id = mapping["roleId"]
+            for member in mapping.get("members", []):
+                # Only import members directly assigned to this app (not inherited)
+                if member.get("ownerType") == "APPLICATION" and member.get("ownerId") == src_app_id:
+                    member_type = member["type"].lower()
+                    member_name = member["userOrGroupName"]
+                    try:
+                        grant_role_app(target_app_id, role_id, member_type, member_name)
+                        print(f"    [OK] Granted role {role_id} to {member_type} '{member_name}'")
+                    except requests.HTTPError as e:
+                        print(f"    [WARN] Failed: {e}")
 
-                    url = f"{config.TARGET_URL}/api/v2/rolePrivileges/{o_type}/{owner_id}/role/{t_role_id}"
-                    res = requests.post(url, auth=config.TARGET_AUTH, json={"type": m_type, "name": m_identity})
-                    
-                    if res.status_code in [200, 204]:
-                        print(f"  [SUCCESS] {m_identity.ljust(15)} -> {role_name} ({scope})")
-                        success_count += 1
+    print("\nImport complete.")
 
-        # --- LOGIC FOR ORGANIZATIONS / APPLICATIONS (List Structure) ---
-        elif scope in ['organizations', 'applications']:
-            o_type = "organization" if scope == 'organizations' else "application"
-            target_map = target_orgs if scope == 'organizations' else target_apps
-            
-            for item in content:
-                item_name = item.get('name', '').lower()
-                target_id = target_map.get(item_name)
-                if not target_id: continue
-
-                # Diagnostic showed 'memberships' is the key here
-                for m_group in item.get('memberships', []):
-                    role_name = role_id_map.get(m_group.get('roleId'), '').lower()
-                    t_role_id = target_roles.get(role_name)
-                    if not t_role_id: continue
-
-                    for member in m_group.get('members', []):
-                        m_identity = member.get('name') or member.get('userOrGroupId') or member.get('id')
-                        m_type = member.get('type')
-                        
-                        if not m_identity: continue
-
-                        url = f"{config.TARGET_URL}/api/v2/rolePrivileges/{o_type}/{target_id}/role/{t_role_id}"
-                        res = requests.post(url, auth=config.TARGET_AUTH, json={"type": m_type, "name": m_identity})
-                        
-                        if res.status_code in [200, 204]:
-                            print(f"  [SUCCESS] {m_identity.ljust(15)} -> {role_name} ({item['name']})")
-                            success_count += 1
-
-    print(f"\n--- FINISHED. Total assignments: {success_count} ---")
 
 if __name__ == "__main__":
     main()
