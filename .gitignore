@@ -1,2 +1,13 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
+# Migration Data (Optional: ignore if you don't want your JSON exports in Git)
 **/migration_data/
+
+# Environment variables
+.env
+
+
