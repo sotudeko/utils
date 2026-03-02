@@ -1,5 +1,5 @@
 import os, json, requests
-from config import TARGET_URL, AUTH, HEADERS, DATA_DIR
+from config import TARGET_URL, TARGET_AUTH, HEADERS, DATA_DIR
 
 def run():
     filepath = os.path.join(DATA_DIR, "roles.json")
@@ -12,7 +12,7 @@ def run():
         roles = json.load(f)
     
     for role in roles:
-        res = requests.post(f"{TARGET_URL}/api/v2/roles", auth=AUTH, headers=HEADERS, json=role)
+        res = requests.post(f"{TARGET_URL}/api/v2/roles", auth=TARGET_AUTH, headers=HEADERS, json=role)
         print(f"   Role '{role.get('name')}': {res.status_code}")
 
 if __name__ == "__main__":
