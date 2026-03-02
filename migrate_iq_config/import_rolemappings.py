@@ -14,7 +14,6 @@ session.headers.update({"Content-Type": "application/json"})
 
 
 def get_app_internal_id_by_public_id(public_id):
-    """Look up the internal ID of an application on the TARGET instance by its public ID."""
     resp = session.get(f"{IQ_URL}/api/v2/applications", params={"publicId": public_id})
     resp.raise_for_status()
     apps = resp.json().get("applications", [])
@@ -24,21 +23,18 @@ def get_app_internal_id_by_public_id(public_id):
 
 
 def grant_role_global(role_id, member_type, member_name):
-    """Grant a role globally (administrator roles)."""
     url = f"{IQ_URL}/api/v2/roleMemberships/global/role/{role_id}/{member_type}/{member_name}"
     resp = session.put(url)
     resp.raise_for_status()
 
 
 def grant_role_org(org_id, role_id, member_type, member_name):
-    """Grant a role to a user/group for an organization."""
     url = f"{IQ_URL}/api/v2/roleMemberships/organization/{org_id}/role/{role_id}/{member_type}/{member_name}"
     resp = session.put(url)
     resp.raise_for_status()
 
 
 def grant_role_app(app_id, role_id, member_type, member_name):
-    """Grant a role to a user/group for an application."""
     url = f"{IQ_URL}/api/v2/roleMemberships/application/{app_id}/role/{role_id}/{member_type}/{member_name}"
     resp = session.put(url)
     resp.raise_for_status()
@@ -63,6 +59,7 @@ def main():
                 print(f"  [WARN] Failed: {e}")
 
     # Import organization role memberships
+    # Only import members whose ownerId matches the org (directly assigned, not inherited)
     print("\nImporting organization role memberships...")
     for org_entry in data.get("organizations", []):
         org_id = org_entry["organizationId"]
@@ -72,8 +69,7 @@ def main():
         for mapping in memberships.get("memberMappings", []):
             role_id = mapping["roleId"]
             for member in mapping.get("members", []):
-                # Only import members directly assigned to this org (not inherited)
-                if member.get("ownerType") == "ORGANIZATION" and member.get("ownerId") == org_id:
+                if member.get("ownerId") == org_id:
                     member_type = member["type"].lower()
                     member_name = member["userOrGroupName"]
                     try:
@@ -83,13 +79,13 @@ def main():
                         print(f"    [WARN] Failed: {e}")
 
     # Import application role memberships
+    # Only import members whose ownerId matches the app (directly assigned, not inherited)
     print("\nImporting application role memberships...")
     for app_entry in data.get("applications", []):
         src_app_id = app_entry["applicationId"]
         app_name = app_entry["applicationName"]
         app_public_id = app_entry.get("applicationPublicId")
 
-        # Resolve target internal ID using public ID
         target_app_id = None
         if app_public_id:
             target_app_id = get_app_internal_id_by_public_id(app_public_id)
@@ -102,8 +98,7 @@ def main():
         for mapping in memberships.get("memberMappings", []):
             role_id = mapping["roleId"]
             for member in mapping.get("members", []):
-                # Only import members directly assigned to this app (not inherited)
-                if member.get("ownerType") == "APPLICATION" and member.get("ownerId") == src_app_id:
+                if member.get("ownerId") == src_app_id:
                     member_type = member["type"].lower()
                     member_name = member["userOrGroupName"]
                     try:

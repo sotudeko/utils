@@ -14,56 +14,48 @@ session.headers.update({"Content-Type": "application/json"})
 
 
 def get_organizations():
-    """Retrieve all organizations."""
     resp = session.get(f"{IQ_URL}/api/v2/organizations")
     resp.raise_for_status()
     return resp.json().get("organizations", [])
 
 
 def get_applications():
-    """Retrieve all applications."""
     resp = session.get(f"{IQ_URL}/api/v2/applications")
     resp.raise_for_status()
     return resp.json().get("applications", [])
 
 
 def get_role_memberships_org(org_id):
-    """Get role memberships for a specific organization."""
     resp = session.get(f"{IQ_URL}/api/v2/roleMemberships/organization/{org_id}")
     resp.raise_for_status()
     return resp.json()
 
 
 def get_role_memberships_app(app_internal_id):
-    """Get role memberships for a specific application."""
     resp = session.get(f"{IQ_URL}/api/v2/roleMemberships/application/{app_internal_id}")
     resp.raise_for_status()
     return resp.json()
 
 
 def get_global_role_memberships():
-    """Get global (administrator) role memberships."""
     resp = session.get(f"{IQ_URL}/api/v2/roleMemberships/global")
     resp.raise_for_status()
     return resp.json()
 
 
 def get_roles():
-    """Retrieve all roles for reference."""
     resp = session.get(f"{IQ_URL}/api/v2/roles")
     resp.raise_for_status()
     return {r["id"]: r["name"] for r in resp.json().get("roles", [])}
 
 
 def main():
-    role_map = get_roles()
+    get_roles()
     export = {}
 
-    # Global role memberships
     print("Fetching global role memberships...")
     export["global"] = get_global_role_memberships()
 
-    # Organization role memberships
     orgs = get_organizations()
     export["organizations"] = []
     for org in orgs:
@@ -77,13 +69,12 @@ def main():
             "roleMemberships": memberships
         })
 
-    # Application role memberships
     apps = get_applications()
     export["applications"] = []
     for app in apps:
-        app_id = app["id"]  # internal ID
+        app_id = app["id"]
         app_name = app.get("name", app_id)
-        app_public_id = app.get("publicId")  # public ID for cross-instance lookup
+        app_public_id = app.get("publicId")
         print(f"Fetching role memberships for app: {app_name} ({app_id})")
         memberships = get_role_memberships_app(app_id)
         export["applications"].append({
@@ -93,7 +84,6 @@ def main():
             "roleMemberships": memberships
         })
 
-    # Write to file
     with open(OUTPUT_FILE, "w") as f:
         json.dump(export, f, indent=2)
 
