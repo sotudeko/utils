@@ -15,5 +15,6 @@ TARGET_AUTH = HTTPBasicAuth(TARGET_USER, TARGET_PASS)
 
 # --- SHARED ---
 DATA_DIR = "./migration_data"
+ORGS_APPS_FILE = "orgs_apps.json"
 HEADERS = {"Content-Type": "application/json"}
 

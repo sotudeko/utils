@@ -1,0 +1,88 @@
+{
+  "global": {
+    "memberMappings": [
+      {
+        "roleId": "b9646757e98e486da7d730025f5245f8",
+        "members": [
+          {
+            "ownerId": "global",
+            "ownerType": "GLOBAL",
+            "type": "USER",
+            "userOrGroupName": "admin"
+          }
+        ]
+      },
+      {
+        "roleId": "1b92fae3e55a411793a091fb821c422d",
+        "members": [
+          {
+            "ownerId": "global",
+            "ownerType": "GLOBAL",
+            "type": "USER",
+            "userOrGroupName": "admin"
+          }
+        ]
+      }
+    ]
+  },
+  "roles": {
+    "roles": [
+      {
+        "id": "3278aac26e9243cfb95cb59ad903f277",
+        "name": "Claim components",
+        "description": "Claim components",
+        "builtIn": false,
+        "permissionCategories": null
+      },
+      {
+        "id": "1b92fae3e55a411793a091fb821c422d",
+        "name": "System Administrator",
+        "description": "Manages system configuration and users.",
+        "builtIn": true,
+        "permissionCategories": null
+      },
+      {
+        "id": "b9646757e98e486da7d730025f5245f8",
+        "name": "Policy Administrator",
+        "description": "Manages all organizations, applications, policies, and policy violations.",
+        "builtIn": true,
+        "permissionCategories": null
+      },
+      {
+        "id": "1cddabf7fdaa47d6833454af10e0a3ef",
+        "name": "Owner",
+        "description": "Manages assigned organizations, applications, policies, and policy violations.",
+        "builtIn": true,
+        "permissionCategories": null
+      },
+      {
+        "id": "1da70fae1fd54d6cb7999871ebdb9a36",
+        "name": "Developer",
+        "description": "Views all information for their assigned organization or application.",
+        "builtIn": true,
+        "permissionCategories": null
+      },
+      {
+        "id": "2cb71b3468d649789163ea2e212b541e",
+        "name": "Application Evaluator",
+        "description": "Evaluates applications and views policy violation summary results.",
+        "builtIn": true,
+        "permissionCategories": null
+      },
+      {
+        "id": "90c7c98683b4471cb77a916744540bcc",
+        "name": "Component Evaluator",
+        "description": "Evaluates individual components and views policy violation results for a specified application.",
+        "builtIn": true,
+        "permissionCategories": null
+      },
+      {
+        "id": "0df46317c031440795007f4ce9c7f002",
+        "name": "Legal Reviewer",
+        "description": "Reviews legal obligations for component licenses.",
+        "builtIn": true,
+        "permissionCategories": null
+      }
+    ]
+  }
+}
