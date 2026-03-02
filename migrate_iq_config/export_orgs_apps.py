@@ -5,10 +5,10 @@ import config
 
 # --- Configuration ---
 IQ_URL = config.SOURCE_URL
-USERNAME = "admin"
-PASSWORD = "admin123"
+USERNAME = config.SOURCE_USER
+PASSWORD = config.SOURCE_PASS
 OUTPUT_DIR = config.DATA_DIR
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "hierarchy_export.json")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, config.ORGS_APPS_FILE)
 
 # Create output directory if it doesn't exist
 os.makedirs(OUTPUT_DIR, exist_ok=True)

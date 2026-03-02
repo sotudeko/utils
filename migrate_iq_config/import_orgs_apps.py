@@ -1,12 +1,13 @@
 import requests
 import json
+import os
 import config
 
 # --- Configuration ---
 TARGET_IQ_URL = config.TARGET_URL
 TARGET_USERNAME = config.TARGET_USER
 TARGET_PASSWORD = config.TARGET_PASS
-INPUT_FILE = "./migration_data/hierarchy_export.json"
+INPUT_FILE = os.path.join(config.DATA_DIR, config.ORGS_APPS_FILE)
 
 session = requests.Session()
 session.auth = (TARGET_USERNAME, TARGET_PASSWORD)
